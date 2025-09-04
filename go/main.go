@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -161,10 +160,10 @@ func deserializePayload(body []byte, serializer string) (payload []byte, seconds
 func s3Put(ctx context.Context, client *s3.Client, bucket, key string, body []byte, contentType string, metadata map[string]string) (seconds float64, err error) {
 	start := time.Now()
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(bucket),
-		Key:         aws.String(key),
+		Bucket:      ptr(bucket),
+		Key:         ptr(key),
 		Body:        bytes.NewReader(body),
-		ContentType: aws.String(contentType),
+		ContentType: ptr(contentType),
 		Metadata:    metadata,
 	})
 	return time.Since(start).Seconds(), err
@@ -173,8 +172,8 @@ func s3Put(ctx context.Context, client *s3.Client, bucket, key string, body []by
 func s3Get(ctx context.Context, client *s3.Client, bucket, key string) (body []byte, metadata map[string]string, seconds float64, err error) {
 	start := time.Now()
 	out, err := client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
+		Bucket: ptr(bucket),
+		Key:    ptr(key),
 	})
 	if err != nil {
 		return nil, nil, 0, err
@@ -209,6 +208,9 @@ func ensureOutDir() (string, error) {
 	}
 	return outDir, nil
 }
+
+// ptr returns a pointer to the provided value (generic helper).
+func ptr[T any](v T) *T { return &v }
 
 func writeMetricsLine(runID, path string, record map[string]any) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -346,7 +348,7 @@ func orchestrateChain(ctx context.Context, s3c *s3.Client, bucket, prefix string
 		toDelete := make([]s3types.ObjectIdentifier, 0, len(producedKeys))
 		for _, k := range producedKeys {
 			key := k
-			toDelete = append(toDelete, s3types.ObjectIdentifier{Key: aws.String(key)})
+			toDelete = append(toDelete, s3types.ObjectIdentifier{Key: ptr(key)})
 		}
 		if err := s3DeleteObjects(ctx, s3c, bucket, toDelete); err != nil {
 			return err
@@ -362,10 +364,10 @@ func s3DeleteObjects(ctx context.Context, client *s3.Client, bucket string, objs
 		return nil
 	}
 	_, err := client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
-		Bucket: aws.String(bucket),
+		Bucket: ptr(bucket),
 		Delete: &s3types.Delete{
 			Objects: objs,
-			Quiet:   aws.Bool(true),
+			Quiet:   ptr(true),
 		},
 	})
 	return err
