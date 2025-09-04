@@ -35,7 +35,7 @@ The goal is to measure end-to-end latency across multiple steps, and break down 
 ## Serialization formats
 
 You can compare multiple formats to understand trade-offs between size and speed:
-- JSON (and optionally JSON Lines)
+- JSON (and optionally JSON Lines), JSON-GZ (JSON wrapper with base64-encoded gzip)
 - Pickle
 - Apache Arrow / Parquet
 - MessagePack
@@ -57,7 +57,7 @@ Config is provided via CLI flags and/or environment variables.
 - Benchmark:
   - STEPS: number of steps in the chain (default: 5)
   - PAYLOAD_MB: approximate size of each payload (default: 50)
-  - SERIALIZER: one of [json, pickle, arrow, parquet, msgpack, raw] (default: json)
+  - SERIALIZER: one of [json, json-gz, pickle, arrow, parquet, msgpack, raw] (default: json)
   - TRANSFORM: one of [noop, cpu, io] (default: noop)
   - CONCURRENCY: orchestration parallelism for multiple chains (future; default: 1)
   - CLEANUP: delete S3 payloads on success [true|false] (default: false)

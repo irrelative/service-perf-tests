@@ -15,6 +15,7 @@ Orchestration Service Tester (S3 Latency + Serialization Benchmark)
 
 import argparse
 import base64
+import gzip
 import json
 import os
 import sys
@@ -71,6 +72,8 @@ def build_s3_uri(bucket: str, key: str) -> str:
 def serializer_ext(serializer: str) -> str:
     if serializer == "json":
         return "json"
+    if serializer == "json-gz":
+        return "json.gz"
     if serializer == "pickle":
         return "pkl"
     raise ValueError(f"Unsupported serializer: {serializer}")
@@ -84,6 +87,12 @@ def serialize_payload(data: bytes, serializer: str) -> Tuple[bytes, str, float]:
     if serializer == "json":
         b64 = base64.b64encode(data).decode("ascii")
         obj = {"type": "bytes", "encoding": "base64", "data": b64}
+        body = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+        ctype = "application/json"
+    elif serializer == "json-gz":
+        compressed = gzip.compress(data)
+        b64 = base64.b64encode(compressed).decode("ascii")
+        obj = {"type": "bytes", "encoding": "base64", "compression": "gzip", "data": b64}
         body = json.dumps(obj, separators=(",", ":")).encode("utf-8")
         ctype = "application/json"
     elif serializer == "pickle":
@@ -106,6 +115,12 @@ def deserialize_payload(body: bytes, serializer: str) -> Tuple[bytes, float]:
         if not (isinstance(obj, dict) and obj.get("encoding") == "base64"):
             raise ValueError("Unexpected JSON payload shape (expected base64-encoded object)")
         payload = base64.b64decode(obj["data"].encode("ascii"))
+    elif serializer == "json-gz":
+        obj = json.loads(body.decode("utf-8"))
+        if not (isinstance(obj, dict) and obj.get("encoding") == "base64" and obj.get("compression") == "gzip"):
+            raise ValueError("Unexpected JSON-GZ payload shape (expected base64-encoded gzip object)")
+        compressed = base64.b64decode(obj["data"].encode("ascii"))
+        payload = gzip.decompress(compressed)
     elif serializer == "pickle":
         import pickle
 
@@ -310,7 +325,7 @@ def build_arg_parser(env_cfg: Dict[str, str]) -> argparse.ArgumentParser:
     p.add_argument("--prefix", default=env_cfg["ORCH_PREFIX"], help="S3 prefix for this run (default: orchestration-bench/runs)")
     p.add_argument("--steps", type=int, default=int(env_cfg["STEPS"]), help="Number of steps in the chain (default: 5)")
     p.add_argument("--payload-mb", type=int, default=int(env_cfg["PAYLOAD_MB"]), help="Payload size in MB (default: 50)")
-    p.add_argument("--serializer", choices=["json", "pickle"], default=env_cfg["SERIALIZER"], help="Serialization format (default: json)")
+    p.add_argument("--serializer", choices=["json", "json-gz", "pickle"], default=env_cfg["SERIALIZER"], help="Serialization format (default: json)")
     p.add_argument("--cleanup", action="store_true" if parse_bool(env_cfg["CLEANUP"]) else "store_false", help="Delete S3 objects after run")
     p.add_argument("--run-id", default="", help="Run identifier (default: auto)")
     p.add_argument("--aws-profile", default=env_cfg["AWS_PROFILE"], help="AWS profile name (optional)")
