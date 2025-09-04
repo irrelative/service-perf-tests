@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/joho/godotenv"
 )
 
@@ -342,9 +343,10 @@ func orchestrateChain(ctx context.Context, s3c *s3.Client, bucket, prefix string
 	fmt.Printf("Run complete. Metrics written to %s\n", metricsPath)
 
 	if cleanup {
-		toDelete := make([]s3typesObjectIdentifier, 0, len(producedKeys))
+		toDelete := make([]s3types.ObjectIdentifier, 0, len(producedKeys))
 		for _, k := range producedKeys {
-			toDelete = append(toDelete, s3typesObjectIdentifier{Key: k})
+			key := k
+			toDelete = append(toDelete, s3types.ObjectIdentifier{Key: aws.String(key)})
 		}
 		if err := s3DeleteObjects(ctx, s3c, bucket, toDelete); err != nil {
 			return err
@@ -355,51 +357,18 @@ func orchestrateChain(ctx context.Context, s3c *s3.Client, bucket, prefix string
 	return nil
 }
 
-// AWS SDK v2 DeleteObjects input helper without importing types alias directly in a dozen places.
-type s3typesObjectIdentifier struct {
-	Key string
-}
-
-func s3DeleteObjects(ctx context.Context, client *s3.Client, bucket string, objs []s3typesObjectIdentifier) error {
+func s3DeleteObjects(ctx context.Context, client *s3.Client, bucket string, objs []s3types.ObjectIdentifier) error {
 	if len(objs) == 0 {
 		return nil
 	}
-	to := make([]s3typesObjectIdentifier, 0, len(objs))
-	to = append(to, objs...)
-	// Build SDK types
-	ids := make([]s3typesObjectIdentifier, 0, len(to))
-	ids = append(ids, to...)
-
-	// We need to convert to SDK's types. Rebuild using the service/types to avoid import confusion.
-	type objectIdentifier struct {
-		Key string `json:"Key"`
-	}
-
-	// Since the SDK expects service/types.ObjectIdentifier, construct via the API input builder.
-	// Simpler: directly build DeleteObjects XML via the client call by mapping fields.
-	// But SDK requires concrete types; construct them now.
-	sdkIDs := make([]s3typesObjectIdentifierSDK, 0, len(ids))
-	for _, id := range ids {
-		sdkIDs = append(sdkIDs, s3typesObjectIdentifierSDK{Key: aws.String(id.Key)})
-	}
 	_, err := client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
 		Bucket: aws.String(bucket),
-		Delete: &s3typesDelete{
-			Objects: sdkIDs,
+		Delete: &s3types.Delete{
+			Objects: objs,
 			Quiet:   aws.Bool(true),
 		},
 	})
 	return err
-}
-
-// Below are minimal wrappers to avoid importing s3/types directly at top, keeping code cohesive.
-type s3typesDelete = struct {
-	Objects []s3typesObjectIdentifierSDK `type:"list" flattened:"true"`
-	Quiet   *bool                        `type:"boolean"`
-}
-type s3typesObjectIdentifierSDK = struct {
-	Key       *string `locationName:"Key" type:"string"`
-	VersionId *string
 }
 
 func round6(x float64) float64 {
