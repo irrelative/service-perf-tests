@@ -185,10 +185,7 @@ func s3Get(ctx context.Context, client *s3.Client, bucket, key string) (body []b
 	}
 	md := map[string]string{}
 	for k, v := range out.Metadata {
-		// Metadata values are pointers; copy to plain map
-		if v != nil {
-			md[k] = *v
-		}
+		md[k] = v
 	}
 	return b, md, time.Since(start).Seconds(), nil
 }
