@@ -20,6 +20,7 @@ import os
 import sys
 import time
 import uuid
+import statistics
 from datetime import datetime
 from typing import Dict, Tuple, Optional
 
@@ -314,6 +315,7 @@ def build_arg_parser(env_cfg: Dict[str, str]) -> argparse.ArgumentParser:
     p.add_argument("--run-id", default="", help="Run identifier (default: auto)")
     p.add_argument("--aws-profile", default=env_cfg["AWS_PROFILE"], help="AWS profile name (optional)")
     p.add_argument("--aws-region", default=env_cfg["AWS_REGION"], help="AWS region (optional; SDK default if blank)")
+    p.add_argument("--repeats", type=int, default=10, help="Repeat the run this many times to compute summary stats (default: 10)")
     return p
 
 
@@ -327,8 +329,7 @@ def main(argv=None) -> int:
         return 2
 
     run_id = args.run_id or (datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
-    # Make a scoped prefix per run
-    prefix = f"{args.prefix.rstrip('/')}/{run_id}"
+    base_prefix = f"{args.prefix.rstrip('/')}/{run_id}"
 
     try:
         s3 = make_boto3_s3_client(profile=args.aws_profile, region=args.aws_region or None)
@@ -336,24 +337,61 @@ def main(argv=None) -> int:
         print(f"ERROR: failed to create S3 client: {e}", file=sys.stderr)
         return 3
 
-    t0 = time.perf_counter()
-    try:
-        orchestrate_chain(
-            s3=s3,
-            bucket=args.bucket,
-            prefix=prefix,
-            steps=args.steps,
-            payload_mb=args.payload_mb,
-            serializer=args.serializer,
-            run_id=run_id,
-            cleanup=bool(args.cleanup),
+    walls = []
+    for i in range(int(args.repeats)):
+        child_run_id = run_id if int(args.repeats) == 1 else f"{run_id}-r{i+1:02d}"
+        repeat_prefix = base_prefix if int(args.repeats) == 1 else f"{base_prefix}/{child_run_id}"
+
+        t0 = time.perf_counter()
+        try:
+            orchestrate_chain(
+                s3=s3,
+                bucket=args.bucket,
+                prefix=repeat_prefix,
+                steps=args.steps,
+                payload_mb=args.payload_mb,
+                serializer=args.serializer,
+                run_id=child_run_id,
+                cleanup=bool(args.cleanup),
+            )
+        except (BotoCoreError, ClientError, ValueError) as e:
+            print(f"ERROR during orchestration: {e}", file=sys.stderr)
+            return 4
+        finally:
+            wall = time.perf_counter() - t0
+            walls.append(wall)
+            print(f"End-to-end wall time: {wall:.3f}s (run_id={child_run_id})")
+
+    if walls:
+        min_s = min(walls)
+        max_s = max(walls)
+        avg_s = sum(walls) / len(walls)
+        stdev_s = statistics.stdev(walls) if len(walls) >= 2 else 0.0
+        median_s = statistics.median(walls)
+
+        print(
+            f"Summary over {len(walls)} runs (base run_id={run_id}): "
+            f"min={min_s:.3f}s max={max_s:.3f}s avg={avg_s:.3f}s stdev={stdev_s:.3f}s median={median_s:.3f}s"
         )
-    except (BotoCoreError, ClientError, ValueError) as e:
-        print(f"ERROR during orchestration: {e}", file=sys.stderr)
-        return 4
-    finally:
-        wall = time.perf_counter() - t0
-        print(f"End-to-end wall time: {wall:.3f}s (run_id={run_id})")
+
+        out_dir = ensure_out_dir()
+        summary_path = os.path.join(out_dir, f"summary-{run_id}.json")
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "base_run_id": run_id,
+                    "repeats": len(walls),
+                    "times_s": [round(x, 6) for x in walls],
+                    "min_s": round(min_s, 6),
+                    "max_s": round(max_s, 6),
+                    "avg_s": round(avg_s, 6),
+                    "stdev_s": round(stdev_s, 6),
+                    "median_s": round(median_s, 6),
+                },
+                f,
+                separators=(",", ":"),
+            )
+        print(f"Wrote summary to {summary_path}")
 
     return 0
 
