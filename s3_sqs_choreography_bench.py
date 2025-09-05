@@ -217,7 +217,12 @@ def delete_queue(sqs, queue_url: str) -> None:
 
 
 def send_json_message(sqs, queue_url: str, obj: Dict) -> None:
-    sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(obj, separators=(",", ":")))
+    resp = sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(obj, separators=(",", ":")))
+    # Log enqueue event
+    msg_id = resp.get("MessageId", "")
+    run_id = obj.get("run_id")
+    step_index = obj.get("step_index")
+    print(f"[enqueue] run_id={run_id} step={step_index} queue={queue_url} message_id={msg_id}")
 
 
 def receive_one_message(sqs, queue_url: str, wait_seconds: int = 20) -> Optional[Dict]:
@@ -276,6 +281,12 @@ def step_worker_loop(
                 continue
 
             input_uri = body["input_s3_uri"]
+            # Log dequeue for this run
+            try:
+                msg_id = msg.get("MessageId", "")
+            except Exception:
+                msg_id = ""
+            print(f"[dequeue] run_id={run_id} step={body.get('step_index')} queue={queue_url} message_id={msg_id} input={input_uri}")
             # Parse key from URI
             if not input_uri.startswith("s3://"):
                 raise ValueError(f"Invalid input_s3_uri: {input_uri}")
@@ -469,6 +480,9 @@ def wait_for_done(sqs, control_queue_url: str, run_id: str, timeout_s: int = 360
         try:
             body = json.loads(msg["Body"])
             if body.get("run_id") == run_id:
+                # Log dequeue of control message
+                msg_id = msg.get("MessageId", "")
+                print(f"[dequeue] control run_id={run_id} queue={control_queue_url} message_id={msg_id} done={body.get('done')}")
                 delete_message(sqs, control_queue_url, msg["ReceiptHandle"])
                 return body
             # Not our run; ignore (do not delete)
