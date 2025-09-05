@@ -111,3 +111,25 @@ Two CLIs are available now:
 - s3_sqs_choreography_bench.py: multi-process choreography using SQS queues (one queue per step, long-polling workers).
 
 Use --help on either script for usage and options.
+
+## Example settings (choreography)
+
+The table below shows example parameters captured for a real run of the choreography benchmark.
+
+| Parameter            | Value                                                               |
+|---------------------:|:--------------------------------------------------------------------|
+| tool                 | s3_sqs_choreography_bench                                          |
+| base_run_id          | 20250905-033401-47fd8bb4-r10                                       |
+| repeats              | 10                                                                  |
+| steps                | 4                                                                   |
+| payload_mb           | 1.0                                                                 |
+| serializer           | json                                                                |
+| bucket               | re-service-test-us-east-2                                           |
+| prefix               | orchestration-bench/runs                                            |
+| queue_prefix         | orchestration-bench-queue                                           |
+| computed_base_prefix | orchestration-bench/runs/20250905-033401-47fd8bb4-r10              |
+| cleanup              | true                                                                |
+| cleanup_queues       | false                                                               |
+| aws_profile          | orch-bench                                                          |
+| aws_region           | us-east-1                                                           |
+| persistent_workers   | true                                                                |
