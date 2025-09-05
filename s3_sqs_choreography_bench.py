@@ -249,16 +249,15 @@ def step_worker_loop(
     stop_event: Event,
     aws_profile: str,
     aws_region: str,
-    run_id: str,
+    run_id_filter: Optional[str],
     step_index: int,
     steps: int,
     bucket: str,
-    base_prefix: str,
     serializer: str,
     queue_url: str,
     next_queue_url: Optional[str],
     control_queue_url: str,
-    metrics_path: str,
+    out_dir: str,
 ):
     """
     Worker loop for a single choreography step. Long-polls its queue, processes messages,
@@ -274,19 +273,21 @@ def step_worker_loop(
         try:
             body = json.loads(msg["Body"])
             msg_run_id = body.get("run_id", "")
-            if msg_run_id != run_id:
+            if run_id_filter and msg_run_id != run_id_filter:
                 # Not our run; ignore and requeue by not deleting.
                 # Sleep briefly to avoid tight spin on foreign messages.
                 time.sleep(1.0)
                 continue
 
             input_uri = body["input_s3_uri"]
+            base_prefix = body["base_prefix"]
+            metrics_path = os.path.join(out_dir, f"metrics-{msg_run_id}.jsonl")
             # Log dequeue for this run
             try:
                 msg_id = msg.get("MessageId", "")
             except Exception:
                 msg_id = ""
-            print(f"[dequeue] run_id={run_id} step={body.get('step_index')} queue={queue_url} message_id={msg_id} input={input_uri}")
+            print(f"[dequeue] run_id={msg_run_id} step={body.get('step_index')} queue={queue_url} message_id={msg_id} input={input_uri}")
             # Parse key from URI
             if not input_uri.startswith("s3://"):
                 raise ValueError(f"Invalid input_s3_uri: {input_uri}")
@@ -318,7 +319,7 @@ def step_worker_loop(
                 out_ctype,
                 metadata={
                     "serializer": current_serializer,
-                    "run_id": run_id,
+                    "run_id": msg_run_id,
                     "step": str(step_index),
                 },
             )
@@ -326,7 +327,7 @@ def step_worker_loop(
 
             # Metrics
             write_metrics_line(
-                run_id,
+                msg_run_id,
                 metrics_path,
                 {
                     "phase": "step",
@@ -352,7 +353,8 @@ def step_worker_loop(
                     sqs,
                     next_queue_url,
                     {
-                        "run_id": run_id,
+                        "run_id": msg_run_id,
+                        "base_prefix": base_prefix,
                         "input_s3_uri": out_uri,
                         "step_index": step_index + 1,
                         "total_steps": steps,
@@ -365,7 +367,7 @@ def step_worker_loop(
                     sqs,
                     control_queue_url,
                     {
-                        "run_id": run_id,
+                        "run_id": msg_run_id,
                         "done": True,
                         "final_s3_uri": out_uri,
                         "total_steps": steps,
@@ -378,7 +380,7 @@ def step_worker_loop(
                     sqs,
                     control_queue_url,
                     {
-                        "run_id": run_id,
+                        "run_id": msg_run_id,
                         "done": False,
                         "error": str(e),
                         "step_index": step_index,
@@ -448,16 +450,25 @@ def seed_initial_payload(s3, bucket: str, base_prefix: str, payload_mb: int, ser
     return seed_uri, [seed_key]
 
 
-def ensure_step_queues(sqs, queue_prefix: str, run_id: str, steps: int) -> Tuple[List[str], str]:
+def ensure_step_queues(sqs, queue_prefix: str, run_id: Optional[str], steps: int) -> Tuple[List[str], str]:
     """
     Ensure per-step queues and a control queue; return (step_queue_urls, control_queue_url).
+
+    If run_id is provided, queues are suffixed per-run. If run_id is None or empty,
+    persistent shared queues are used (no run_id in the name).
     """
-    # Names must be <= 80 chars; run_id is short; prefix should be reasonably short too.
+    # Names must be <= 80 chars; keep components short.
     step_urls: List[str] = []
     for i in range(1, steps + 1):
-        qn = f"{queue_prefix}-{run_id}-s{i:03d}"
+        if run_id:
+            qn = f"{queue_prefix}-{run_id}-s{i:03d}"
+        else:
+            qn = f"{queue_prefix}-s{i:03d}"
         step_urls.append(ensure_queue(sqs, qn))
-    control_name = f"{queue_prefix}-{run_id}-control"
+    if run_id:
+        control_name = f"{queue_prefix}-{run_id}-control"
+    else:
+        control_name = f"{queue_prefix}-control"
     control_url = ensure_queue(sqs, control_name, visibility_timeout=60, receive_wait=20)
     return step_urls, control_url
 
@@ -531,6 +542,43 @@ def main(argv=None) -> int:
         print(f"ERROR: failed to create AWS clients: {e}", file=sys.stderr)
         return 3
 
+    persistent_workers = int(args.repeats) > 1
+    out_dir = ensure_out_dir()
+    # If using persistent workers, create shared queues and spawn workers once
+    if persistent_workers:
+        step_queue_urls, control_queue_url = ensure_step_queues(sqs, args.queue_prefix, None, args.steps)
+        all_queue_urls = step_queue_urls + [control_queue_url]
+        stop_event = Event()
+        procs: List[Process] = []
+        for i, qurl in enumerate(step_queue_urls, start=1):
+            next_qurl = step_queue_urls[i] if i < args.steps else None  # i is 1-based
+            p = Process(
+                target=step_worker_loop,
+                args=(
+                    stop_event,
+                    args.aws_profile,
+                    args.aws_region,
+                    None,  # run_id_filter=None to accept all runs
+                    i,
+                    args.steps,
+                    args.bucket,
+                    args.serializer,
+                    qurl,
+                    next_qurl,
+                    control_queue_url,
+                    out_dir,
+                ),
+                daemon=True,
+            )
+            p.start()
+            procs.append(p)
+    else:
+        stop_event = None
+        procs = []
+        step_queue_urls = []
+        control_queue_url = ""
+        all_queue_urls = []
+
     walls: List[float] = []
     for rep in range(int(args.repeats)):
         run_id = args.run_id or (datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
@@ -538,39 +586,37 @@ def main(argv=None) -> int:
             run_id = f"{run_id}-r{rep+1:02d}"
 
         base_prefix = f"{args.prefix.rstrip('/')}/{run_id}"
-        out_dir = ensure_out_dir()
         metrics_path = os.path.join(out_dir, f"metrics-{run_id}.jsonl")
 
-        # Ensure queues
-        step_queue_urls, control_queue_url = ensure_step_queues(sqs, args.queue_prefix, run_id, args.steps)
-        all_queue_urls = step_queue_urls + [control_queue_url]
+        # Ensure queues and spawn workers if not using persistent workers
+        if not persistent_workers:
+            step_queue_urls, control_queue_url = ensure_step_queues(sqs, args.queue_prefix, run_id, args.steps)
+            all_queue_urls = step_queue_urls + [control_queue_url]
 
-        # Spawn workers
-        stop_event = Event()
-        procs: List[Process] = []
-        for i, qurl in enumerate(step_queue_urls, start=1):
-            next_qurl = step_queue_urls[i] if i < args.steps else None  # i is 1-based; step_queue_urls index 0-based
-            p = Process(
-                target=step_worker_loop,
-                args=(
-                    stop_event,
-                    args.aws_profile,
-                    args.aws_region,
-                    run_id,
-                    i,
-                    args.steps,
-                    args.bucket,
-                    base_prefix,
-                    args.serializer,
-                    qurl,
-                    next_qurl,
-                    control_queue_url,
-                    metrics_path,
-                ),
-                daemon=True,
-            )
-            p.start()
-            procs.append(p)
+            stop_event = Event()
+            procs = []
+            for i, qurl in enumerate(step_queue_urls, start=1):
+                next_qurl = step_queue_urls[i] if i < args.steps else None  # i is 1-based; step_queue_urls index 0-based
+                p = Process(
+                    target=step_worker_loop,
+                    args=(
+                        stop_event,
+                        args.aws_profile,
+                        args.aws_region,
+                        run_id,  # run_id_filter
+                        i,
+                        args.steps,
+                        args.bucket,
+                        args.serializer,
+                        qurl,
+                        next_qurl,
+                        control_queue_url,
+                        out_dir,
+                    ),
+                    daemon=True,
+                )
+                p.start()
+                procs.append(p)
 
         t0 = time.perf_counter()
         produced_keys: List[str] = []
@@ -586,6 +632,7 @@ def main(argv=None) -> int:
                     step_queue_urls[0],
                     {
                         "run_id": run_id,
+                        "base_prefix": base_prefix,
                         "input_s3_uri": seed_uri,
                         "step_index": 1,
                         "total_steps": args.steps,
@@ -607,16 +654,16 @@ def main(argv=None) -> int:
             walls.append(wall)
             print(f"End-to-end wall time: {wall:.3f}s (run_id={run_id})")
 
-            # Stop workers
-            stop_event.set()
-            for p in procs:
-                p.join(timeout=5)
-                if p.is_alive():
-                    p.terminate()
+            # Stop workers and cleanup queues only if not persistent
+            if not persistent_workers:
+                stop_event.set()
+                for p in procs:
+                    p.join(timeout=5)
+                    if p.is_alive():
+                        p.terminate()
 
-            # Cleanup queues
-            if bool(args.cleanup_queues):
-                cleanup_queues(sqs, all_queue_urls)
+                if bool(args.cleanup_queues):
+                    cleanup_queues(sqs, all_queue_urls)
 
             # Cleanup S3 objects (we know the naming scheme: step-000..step-N)
             if bool(args.cleanup):
@@ -627,6 +674,16 @@ def main(argv=None) -> int:
                     print(f"Cleanup complete. Deleted {len(keys)} objects from s3://{args.bucket}/{base_prefix.rstrip('/')}/")
                 except Exception as e:
                     print(f"WARNING: failed to cleanup S3 objects: {e}", file=sys.stderr)
+
+    # If persistent workers were used, stop and (optionally) cleanup queues now
+    if persistent_workers:
+        stop_event.set()
+        for p in procs:
+            p.join(timeout=5)
+            if p.is_alive():
+                p.terminate()
+        if bool(args.cleanup_queues):
+            cleanup_queues(sqs, all_queue_urls)
 
     # Optional summary for repeats
     if walls:
