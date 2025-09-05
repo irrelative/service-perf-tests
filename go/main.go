@@ -48,7 +48,7 @@ func loadEnv() envCfg {
 	}
 
 	cfg.Steps = getenvInt("STEPS", 5)
-	cfg.PayloadMB = getenvInt("PAYLOAD_MB", 50)
+	cfg.PayloadMB = getenvInt("PAYLOAD_MB", 5)
 	cfg.Serializer = strings.ToLower(getenvDefault("SERIALIZER", "json"))
 	cfg.Cleanup = getenvBool("CLEANUP", false)
 
@@ -437,7 +437,7 @@ func main() {
 		flagBucket     = flag.String("bucket", env.Bucket, "S3 bucket for payloads (required if not in env)")
 		flagPrefix     = flag.String("prefix", env.Prefix, "S3 prefix for this run (default: orchestration-bench/runs)")
 		flagSteps      = flag.Int("steps", env.Steps, "Number of steps in the chain (default: 5)")
-		flagPayloadMB  = flag.Int("payload-mb", env.PayloadMB, "Payload size in MB (default: 50)")
+		flagPayloadMB  = flag.Int("payload-mb", env.PayloadMB, "Payload size in MB (default: 5)")
 		flagSerializer = flag.String("serializer", "json", "Serialization format (only: json)")
 		flagCleanup    = flag.Bool("cleanup", env.Cleanup, "Delete S3 objects after run")
 		flagRunID      = flag.String("run-id", "", "Run identifier (default: auto)")
