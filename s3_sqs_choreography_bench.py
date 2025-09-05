@@ -172,6 +172,28 @@ def noop_transform(payload: bytes) -> Tuple[bytes, float]:
     return payload, time.perf_counter() - t0
 
 
+def make_compressible_bytes(total_size: int, incompressible_fraction: float = 0.25) -> bytes:
+    """
+    Generate bytes that compress well with gzip. Approximately `incompressible_fraction`
+    of the data is random; the rest is a small repeating pattern. With gzip, this
+    typically yields a compressed size around the incompressible_fraction of the original.
+    """
+    if total_size <= 0:
+        return b""
+    rand_size = int(total_size * incompressible_fraction)
+    comp_size = total_size - rand_size
+    # Repeating ASCII pattern for high compressibility
+    pattern = b"0123456789ABCDEF"
+    if comp_size > 0:
+        reps = (comp_size // len(pattern)) + 1
+        comp_bytes = (pattern * reps)[:comp_size]
+    else:
+        comp_bytes = b""
+    rand_bytes = os.urandom(rand_size) if rand_size > 0 else b""
+    # Place compressible bytes first, then random tail
+    return comp_bytes + rand_bytes
+
+
 def ensure_out_dir() -> str:
     out_dir = os.path.join(".", "out")
     os.makedirs(out_dir, exist_ok=True)
@@ -414,7 +436,7 @@ def seed_initial_payload(s3, bucket: str, base_prefix: str, payload_mb: int, ser
     Seeds the initial payload (step 0) to S3 and writes metrics. Returns (seed_uri, produced_keys).
     """
     payload_size = payload_mb * 1024 * 1024
-    seed_bytes = os.urandom(payload_size)
+    seed_bytes = make_compressible_bytes(payload_size, incompressible_fraction=0.25)
     seed_key = f"{base_prefix.rstrip('/')}/step-000.{serializer_ext(serializer)}"
     seed_uri = build_s3_uri(bucket, seed_key)
 
