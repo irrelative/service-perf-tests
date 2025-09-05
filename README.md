@@ -53,6 +53,7 @@ Config is provided via CLI flags and/or environment variables.
   - AWS_PROFILE (optional if not using instance role or env creds)
   - S3 bucket: ORCH_BUCKET
   - S3 prefix: ORCH_PREFIX (e.g., orchestration-bench/runs/${DATE}/${RUN_ID}/)
+  - SQS queue prefix: ORCH_QUEUE_PREFIX (e.g., orchestration-bench-queue)
 
 - Benchmark:
   - STEPS: number of steps in the chain (default: 5)
@@ -105,4 +106,8 @@ Minimum recommended policy will be provided alongside the CLI once implemented.
 - Configure ORCH_BUCKET and ORCH_PREFIX.
 - Run the CLI (to be added) to start a benchmark run.
 
-A minimal working CLI and reference implementation will be added next.
+Two CLIs are available now:
+- s3_orch_bench.py: single-process orchestrator that performs each step inline.
+- s3_sqs_choreography_bench.py: multi-process choreography using SQS queues (one queue per step, long-polling workers).
+
+Use --help on either script for usage and options.
