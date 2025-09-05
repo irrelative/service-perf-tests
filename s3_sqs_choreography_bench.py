@@ -610,6 +610,7 @@ def main(argv=None) -> int:
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
+                    "tool": "s3_sqs_choreography_bench",
                     "base_run_id": summary_run_id,
                     "repeats": len(walls),
                     "times_s": [round(x, 6) for x in walls],
@@ -618,6 +619,21 @@ def main(argv=None) -> int:
                     "avg_s": round(avg_s, 6),
                     "stdev_s": round(stdev_s, 6),
                     "median_s": round(median_s, 6),
+                    "settings": {
+                        "bucket": args.bucket,
+                        "prefix": args.prefix,
+                        "queue_prefix": args.queue_prefix,
+                        "computed_base_prefix": f"{args.prefix.rstrip('/')}/{summary_run_id}",
+                        "steps": args.steps,
+                        "payload_mb": args.payload_mb,
+                        "serializer": args.serializer,
+                        "cleanup": bool(args.cleanup),
+                        "cleanup_queues": bool(args.cleanup_queues),
+                        "aws_profile": args.aws_profile,
+                        "aws_region": args.aws_region,
+                        "persistent_workers": bool(persistent_workers),
+                        "repeats": int(args.repeats),
+                    },
                 },
                 f,
                 separators=(",", ":"),

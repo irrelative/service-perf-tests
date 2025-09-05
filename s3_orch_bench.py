@@ -298,6 +298,7 @@ def main(argv=None) -> int:
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
+                    "tool": "s3_orch_bench",
                     "base_run_id": run_id,
                     "repeats": len(walls),
                     "times_s": [round(x, 6) for x in walls],
@@ -306,6 +307,17 @@ def main(argv=None) -> int:
                     "avg_s": round(avg_s, 6),
                     "stdev_s": round(stdev_s, 6),
                     "median_s": round(median_s, 6),
+                    "settings": {
+                        "bucket": args.bucket,
+                        "prefix": args.prefix,
+                        "computed_base_prefix": f"{args.prefix.rstrip('/')}/{run_id}",
+                        "steps": args.steps,
+                        "payload_mb": args.payload_mb,
+                        "serializer": args.serializer,
+                        "cleanup": bool(args.cleanup),
+                        "aws_profile": args.aws_profile,
+                        "aws_region": args.aws_region,
+                    },
                 },
                 f,
                 separators=(",", ":"),
