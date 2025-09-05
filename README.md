@@ -112,24 +112,11 @@ Two CLIs are available now:
 
 Use --help on either script for usage and options.
 
-## Example settings (choreography)
+## Example settings (sample runs)
 
-The table below shows example parameters captured for a real run of the choreography benchmark.
+The table below shows example parameters captured for real runs of both benchmarks.
 
-| Parameter            | Value                                                               |
-|---------------------:|:--------------------------------------------------------------------|
-| tool                 | s3_sqs_choreography_bench                                          |
-| base_run_id          | 20250905-033401-47fd8bb4-r10                                       |
-| repeats              | 10                                                                  |
-| steps                | 4                                                                   |
-| payload_mb           | 1.0                                                                 |
-| serializer           | json                                                                |
-| bucket               | re-service-test-us-east-2                                           |
-| prefix               | orchestration-bench/runs                                            |
-| queue_prefix         | orchestration-bench-queue                                           |
-| computed_base_prefix | orchestration-bench/runs/20250905-033401-47fd8bb4-r10              |
-| cleanup              | true                                                                |
-| cleanup_queues       | false                                                               |
-| aws_profile          | orch-bench                                                          |
-| aws_region           | us-east-1                                                           |
-| persistent_workers   | true                                                                |
+| tool                         | base_run_id                           | repeats | steps | payload_mb | serializer | bucket                    | prefix                      | queue_prefix              | computed_base_prefix                                           | cleanup | cleanup_queues | aws_profile | aws_region | persistent_workers |
+|-----------------------------:|:--------------------------------------|--------:|------:|-----------:|:-----------|:---------------------------|:----------------------------|:--------------------------|:----------------------------------------------------------------|:--------|:---------------|:------------|:-----------|:-------------------|
+| s3_sqs_choreography_bench    | 20250905-033401-47fd8bb4-r10          |      10 |     4 |        1.0 | json       | re-service-test-us-east-2  | orchestration-bench/runs    | orchestration-bench-queue | orchestration-bench/runs/20250905-033401-47fd8bb4-r10         | true    | false          | orch-bench  | us-east-1  | true               |
+| s3_orch_bench                | 20250905-033553-4b4bbb67              |      10 |     4 |        1.0 | json       | re-service-test-us-east-2  | orchestration-bench/runs    | -                        | orchestration-bench/runs/20250905-033553-4b4bbb67             | true    | -              | orch-bench  | us-east-1  | -                  |
