@@ -22,6 +22,7 @@ import os
 import sys
 import time
 import uuid
+import math
 from datetime import datetime
 from typing import Dict, Tuple, Optional, List
 from multiprocessing import Process, Event
@@ -431,11 +432,11 @@ def step_worker_loop(
 # Orchestration (choreography driver)
 # -----------------------------
 
-def seed_initial_payload(s3, bucket: str, base_prefix: str, payload_mb: int, serializer: str, run_id: str, metrics_path: str) -> Tuple[str, List[str]]:
+def seed_initial_payload(s3, bucket: str, base_prefix: str, payload_mb: float, serializer: str, run_id: str, metrics_path: str) -> Tuple[str, List[str]]:
     """
     Seeds the initial payload (step 0) to S3 and writes metrics. Returns (seed_uri, produced_keys).
     """
-    payload_size = payload_mb * 1024 * 1024
+    payload_size = int(round(payload_mb * 1024 * 1024))
     seed_bytes = make_compressible_bytes(payload_size, incompressible_fraction=0.25)
     seed_key = f"{base_prefix.rstrip('/')}/step-000.{serializer_ext(serializer)}"
     seed_uri = build_s3_uri(bucket, seed_key)
@@ -538,7 +539,7 @@ def build_arg_parser(env_cfg: Dict[str, str]) -> argparse.ArgumentParser:
     p.add_argument("--prefix", default=env_cfg["ORCH_PREFIX"], help="S3 prefix for this run (default: orchestration-bench/runs)")
     p.add_argument("--queue-prefix", default=env_cfg["ORCH_QUEUE_PREFIX"], help="SQS queue name prefix (default: orchestration-bench-queue)")
     p.add_argument("--steps", type=int, default=int(env_cfg["STEPS"]), help="Number of steps in the chain (default: 5)")
-    p.add_argument("--payload-mb", type=int, default=int(env_cfg["PAYLOAD_MB"]), help="Payload size in MB (default: 50)")
+    p.add_argument("--payload-mb", type=float, default=float(env_cfg["PAYLOAD_MB"]), help="Payload size in MB (float, default: 50)")
     p.add_argument("--serializer", choices=["json", "json-gz", "pickle"], default=env_cfg["SERIALIZER"], help="Serialization format (default: json)")
     p.add_argument("--cleanup", action="store_true" if parse_bool(env_cfg["CLEANUP"]) else "store_false", help="Delete S3 objects after run")
     p.add_argument("--cleanup-queues", action="store_true" if parse_bool(env_cfg["CLEANUP_QUEUES"]) else "store_false", help="Delete ephemeral SQS queues after run")

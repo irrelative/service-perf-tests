@@ -22,6 +22,7 @@ import sys
 import time
 import uuid
 import statistics
+import math
 from datetime import datetime
 from typing import Dict, Tuple, Optional
 
@@ -214,7 +215,7 @@ def orchestrate_chain(
     bucket: str,
     prefix: str,
     steps: int,
-    payload_mb: int,
+    payload_mb: float,
     serializer: str,
     run_id: str,
     cleanup: bool,
@@ -223,7 +224,7 @@ def orchestrate_chain(
     metrics_path = os.path.join(out_dir, f"metrics-{run_id}.jsonl")
 
     # Seed initial payload
-    payload_size = payload_mb * 1024 * 1024
+    payload_size = int(round(payload_mb * 1024 * 1024))
     seed_bytes = make_compressible_bytes(payload_size, incompressible_fraction=0.25)
     seed_key = f"{prefix.rstrip('/')}/step-000.{serializer_ext(serializer)}"
     seed_uri = build_s3_uri(bucket, seed_key)
@@ -346,7 +347,7 @@ def build_arg_parser(env_cfg: Dict[str, str]) -> argparse.ArgumentParser:
     p.add_argument("--bucket", default=env_cfg["ORCH_BUCKET"], help="S3 bucket for payloads (required if not in env)")
     p.add_argument("--prefix", default=env_cfg["ORCH_PREFIX"], help="S3 prefix for this run (default: orchestration-bench/runs)")
     p.add_argument("--steps", type=int, default=int(env_cfg["STEPS"]), help="Number of steps in the chain (default: 5)")
-    p.add_argument("--payload-mb", type=int, default=int(env_cfg["PAYLOAD_MB"]), help="Payload size in MB (default: 50)")
+    p.add_argument("--payload-mb", type=float, default=float(env_cfg["PAYLOAD_MB"]), help="Payload size in MB (float, default: 50)")
     p.add_argument("--serializer", choices=["json", "json-gz", "pickle"], default=env_cfg["SERIALIZER"], help="Serialization format (default: json)")
     p.add_argument("--cleanup", action="store_true" if parse_bool(env_cfg["CLEANUP"]) else "store_false", help="Delete S3 objects after run")
     p.add_argument("--run-id", default="", help="Run identifier (default: auto)")
