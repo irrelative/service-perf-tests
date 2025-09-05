@@ -18,6 +18,7 @@ import argparse
 import base64
 import gzip
 import json
+import io
 import os
 import sys
 import time
@@ -28,6 +29,8 @@ from typing import Dict, Tuple, Optional, List
 from multiprocessing import Process, Event
 
 import boto3
+from boto3.s3.transfer import TransferConfig
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from dotenv import load_dotenv
 
@@ -62,7 +65,8 @@ def parse_bool(value: str) -> bool:
 
 def make_boto3_clients(profile: str = "", region: str = ""):
     session = boto3.Session(profile_name=profile or None, region_name=region or None)
-    return session.client("s3"), session.client("sqs")
+    cfg = Config(max_pool_connections=64)
+    return session.client("s3", config=cfg), session.client("sqs", config=cfg)
 
 
 def build_s3_uri(bucket: str, key: str) -> str:
@@ -74,6 +78,8 @@ def serializer_ext(serializer: str) -> str:
         return "json"
     if serializer == "json-gz":
         return "json.gz"
+    if serializer == "raw-gz":
+        return "gz"
     if serializer == "pickle":
         return "pkl"
     raise ValueError(f"Unsupported serializer: {serializer}")
@@ -90,11 +96,14 @@ def serialize_payload(data: bytes, serializer: str) -> Tuple[bytes, str, float]:
         body = json.dumps(obj, separators=(",", ":")).encode("utf-8")
         ctype = "application/json"
     elif serializer == "json-gz":
-        compressed = gzip.compress(data)
+        compressed = gzip.compress(data, compresslevel=1)
         b64 = base64.b64encode(compressed).decode("ascii")
         obj = {"type": "bytes", "encoding": "base64", "compression": "gzip", "data": b64}
         body = json.dumps(obj, separators=(",", ":")).encode("utf-8")
         ctype = "application/json"
+    elif serializer == "raw-gz":
+        body = gzip.compress(data, compresslevel=1)
+        ctype = "application/octet-stream"
     elif serializer == "pickle":
         import pickle
         body = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
@@ -120,6 +129,8 @@ def deserialize_payload(body: bytes, serializer: str) -> Tuple[bytes, float]:
             raise ValueError("Unexpected JSON-GZ payload shape (expected base64-encoded gzip object)")
         compressed = base64.b64decode(obj["data"].encode("ascii"))
         payload = gzip.decompress(compressed)
+    elif serializer == "raw-gz":
+        payload = gzip.decompress(body)
     elif serializer == "pickle":
         import pickle
         payload = pickle.loads(body)
@@ -143,12 +154,19 @@ def s3_put(
     Uploads to S3 and returns upload_seconds.
     """
     t0 = time.perf_counter()
-    s3.put_object(
+    buf = io.BytesIO(body)
+    transfer_cfg = TransferConfig(
+        multipart_threshold=8*1024*1024,
+        multipart_chunksize=8*1024*1024,
+        max_concurrency=16,
+        use_threads=True,
+    )
+    s3.upload_fileobj(
+        Fileobj=buf,
         Bucket=bucket,
         Key=key,
-        Body=body,
-        ContentType=content_type,
-        Metadata=metadata or {},
+        ExtraArgs={"ContentType": content_type, "Metadata": metadata or {}},
+        Config=transfer_cfg,
     )
     return time.perf_counter() - t0
 
@@ -158,9 +176,17 @@ def s3_get(s3, bucket: str, key: str) -> Tuple[bytes, Dict[str, str], float]:
     Downloads from S3 and returns (body, metadata, download_seconds).
     """
     t0 = time.perf_counter()
-    resp = s3.get_object(Bucket=bucket, Key=key)
-    body = resp["Body"].read()
-    md = resp.get("Metadata", {}) or {}
+    head = s3.head_object(Bucket=bucket, Key=key)
+    md = head.get("Metadata", {}) or {}
+    buf = io.BytesIO()
+    transfer_cfg = TransferConfig(
+        multipart_threshold=8*1024*1024,
+        multipart_chunksize=8*1024*1024,
+        max_concurrency=16,
+        use_threads=True,
+    )
+    s3.download_fileobj(Bucket=bucket, Key=key, Fileobj=buf, Config=transfer_cfg)
+    body = buf.getvalue()
     return body, md, time.perf_counter() - t0
 
 
@@ -540,7 +566,7 @@ def build_arg_parser(env_cfg: Dict[str, str]) -> argparse.ArgumentParser:
     p.add_argument("--queue-prefix", default=env_cfg["ORCH_QUEUE_PREFIX"], help="SQS queue name prefix (default: orchestration-bench-queue)")
     p.add_argument("--steps", type=int, default=int(env_cfg["STEPS"]), help="Number of steps in the chain (default: 5)")
     p.add_argument("--payload-mb", type=float, default=float(env_cfg["PAYLOAD_MB"]), help="Payload size in MB (float, default: 50)")
-    p.add_argument("--serializer", choices=["json", "json-gz", "pickle"], default=env_cfg["SERIALIZER"], help="Serialization format (default: json)")
+    p.add_argument("--serializer", choices=["json", "json-gz", "raw-gz", "pickle"], default=env_cfg["SERIALIZER"], help="Serialization format (default: json)")
     p.add_argument("--cleanup", action="store_true" if parse_bool(env_cfg["CLEANUP"]) else "store_false", help="Delete S3 objects after run")
     p.add_argument("--cleanup-queues", action="store_true" if parse_bool(env_cfg["CLEANUP_QUEUES"]) else "store_false", help="Delete ephemeral SQS queues after run")
     p.add_argument("--run-id", default="", help="Run identifier (default: auto)")
