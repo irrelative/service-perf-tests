@@ -5,7 +5,7 @@ Shared utilities for orchestration/choreography benchmarks.
 Includes:
 - AWS client constructors with tuned connection pools
 - S3 helpers using boto3 TransferManager for parallel I/O
-- Serialization helpers (json, json-gz, raw-gz, pickle)
+- Serialization helpers (json, json-gz, raw-gz, pickle, protobuf)
 - Simple transform and payload generation helpers
 - Filesystem helpers for metrics output
 """
@@ -52,6 +52,8 @@ def serializer_ext(serializer: str) -> str:
         return "gz"
     if serializer == "pickle":
         return "pkl"
+    if serializer == "protobuf":
+        return "pb"
     raise ValueError(f"Unsupported serializer: {serializer}")
 
 
@@ -76,6 +78,11 @@ def serialize_payload(data: bytes, serializer: str) -> Tuple[bytes, str, float]:
         ctype = "application/octet-stream"
     elif serializer == "pickle":
         body = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
+        ctype = "application/octet-stream"
+    elif serializer == "protobuf":
+        from google.protobuf.wrappers_pb2 import BytesValue as _BytesValue
+        msg = _BytesValue(value=data)
+        body = msg.SerializeToString()
         ctype = "application/octet-stream"
     else:
         raise ValueError(f"Unsupported serializer: {serializer}")
@@ -106,6 +113,11 @@ def deserialize_payload(body: bytes, serializer: str) -> Tuple[bytes, float]:
         if not isinstance(payload, (bytes, bytearray)):
             raise ValueError("Unexpected pickle payload type (expected bytes)")
         payload = bytes(payload)
+    elif serializer == "protobuf":
+        from google.protobuf.wrappers_pb2 import BytesValue as _BytesValue
+        msg = _BytesValue()
+        msg.ParseFromString(body)
+        payload = bytes(msg.value)
     else:
         raise ValueError(f"Unsupported serializer: {serializer}")
     return payload, time.perf_counter() - t0

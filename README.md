@@ -39,6 +39,7 @@ You can compare multiple formats to understand trade-offs between size and speed
 - Pickle
 - Apache Arrow / Parquet
 - MessagePack
+- Protocol Buffers
 - Raw bytes (pre-compressed or not)
 - CSV (for simple tabular payloads)
 
@@ -58,7 +59,7 @@ Config is provided via CLI flags and/or environment variables.
 - Benchmark:
   - STEPS: number of steps in the chain (default: 5)
   - PAYLOAD_MB: approximate size of each payload (default: 50)
-  - SERIALIZER: one of [json, json-gz, pickle, arrow, parquet, msgpack, raw] (default: json)
+  - SERIALIZER: one of [json, json-gz, pickle, protobuf, arrow, parquet, msgpack, raw] (default: json)
   - TRANSFORM: one of [noop, cpu, io] (default: noop)
   - CONCURRENCY: orchestration parallelism for multiple chains (future; default: 1)
   - CLEANUP: delete S3 payloads on success [true|false] (default: false)
