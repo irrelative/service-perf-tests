@@ -14,6 +14,7 @@ import gzip
 import io
 import json
 import os
+import pickle
 import time
 from typing import Dict, Optional, Tuple, List
 
@@ -74,7 +75,6 @@ def serialize_payload(data: bytes, serializer: str) -> Tuple[bytes, str, float]:
         body = gzip.compress(data, compresslevel=1)
         ctype = "application/octet-stream"
     elif serializer == "pickle":
-        import pickle
         body = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
         ctype = "application/octet-stream"
     else:
